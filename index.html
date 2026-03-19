@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Block Experiment</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --success: #059669;
+            --error: #dc2626;
+            --bg: #f8fafc;
+        }
+        body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); display: flex; justify-content: center; padding: 20px; margin: 0; }
+        #app { background: white; width: 100%; max-width: 600px; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); min-height: 500px; }
+        .hidden { display: none; }
+
+        /* UI Components */
+        .header { display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 1.1em; font-weight: bold; color: #1e293b; }
+        .image-container { width: 100%; height: 320px; background: #f1f5f9; border-radius: 8px; display: flex; align-items: center; justify-content: center; overflow: hidden; margin-bottom: 20px; border: 1px solid #e2e8f0; }
+        .image-container img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+        .info-panel { margin-bottom: 20px; padding: 15px; background: #f8fafc; border-radius: 8px; }
+        .label { font-weight: bold; color: #475569; margin-right: 8px; }
+
+        /* Confidence Bar */
+        .confidence-wrapper { margin: 15px 0; }
+        .bar-bg { background: #e2e8f0; height: 14px; border-radius: 7px; width: 100%; position: relative; margin-top: 5px; }
+        #confidence-bar { background: var(--primary); height: 100%; border-radius: 7px; transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+
+        /* Buttons */
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; }
+        button { padding: 14px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 1em; transition: transform 0.1s, opacity 0.2s; }
+        button:active { transform: scale(0.98); }
+        .btn-correct { background: var(--success); color: white; }
+        .btn-wrong { background: var(--error); color: white; }
+        .btn-next { background: var(--primary); color: white; width: 100%; margin-top: 20px; }
+        .btn-transition { background: #334155; color: white; width: 100%; padding: 20px; font-size: 1.2em; }
+
+        /* Feedback & Transitions */
+        #feedback { padding: 20px; border-radius: 8px; margin-top: 20px; text-align: center; font-size: 1.1em; }
+        .feedback-correct { background: #d1fae5; color: #065f46; border: 2px solid #059669; }
+        .feedback-wrong { background: #fee2e2; color: #991b1b; border: 2px solid #dc2626; }
+        .transition-box { text-align: center; padding: 40px 20px; }
+        .transition-box h2 { color: var(--primary); margin-bottom: 20px; }
+
+        /* Results Table */
+        table { width: 100%; border-collapse: collapse; margin-top: 25px; }
+        th, td { border: 1px solid #e2e8f0; padding: 14px; text-align: left; }
+        th { background: #f1f5f9; color: #475569; }
+        .emoji-span { font-size: 1.2em; margin-left: 5px; }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <div id="start-screen">
+        <h1>Biology Learning Experiment</h1>
+        <p>This experiment is divided into 4 blocks. You will classify 25 images of one category at a time.</p>
+        <p>The AI will help you name the species. Your goal is to determine if the AI is correct.</p>
+        <button class="btn-next" onclick="startExperiment()">Start Block 1</button>
+    </div>
+
+    <div id="transition-screen" class="hidden">
+        <div class="transition-box">
+            <h2 id="transition-title">Block Complete</h2>
+            <p id="transition-msg" style="font-size: 1.2em; line-height: 1.6;"></p>
+            <button class="btn-transition" onclick="resumeExperiment()">Continue to Next Block</button>
+        </div>
+    </div>
+
+    <div id="trial-screen" class="hidden">
+        <div class="header">
+            <span id="trial-count">Trial 1 / 100</span>
+            <span id="trial-cat">Category: ...</span>
+        </div>
+
+        <div class="image-container">
+            <img id="trial-image" src="" alt="Trial Image">
+        </div>
+
+        <div class="info-panel">
+            <div><span class="label">AI Prediction:</span> <span id="ai-dsp" style="font-style: italic;">...</span></div>
+            <div class="confidence-wrapper">
+                <span class="label">AI Confidence:</span> <span id="conf-text">0%</span>
+                <div class="bar-bg"><div id="confidence-bar" style="width: 0%"></div></div>
+            </div>
+        </div>
+
+        <div id="question-area">
+            <p style="text-align: center; font-size: 1.1em;"><strong>Is the AI prediction correct?</strong></p>
+            <div class="btn-group">
+                <button class="btn-correct" onclick="handleResponse(1)">AI is Correct</button>
+                <button class="btn-wrong" onclick="handleResponse(0)">AI is Wrong</button>
+            </div>
+        </div>
+
+        <div id="feedback-area" class="hidden">
+            <div id="feedback"></div>
+            <button class="btn-next" onclick="checkNextStep()">Next Trial</button>
+        </div>
+    </div>
+
+    <div id="results-screen" class="hidden">
+        <h1>Performance Summary</h1>
+        <div id="results-table-container"></div>
+        <button class="btn-next" onclick="location.reload()">Restart Experiment</button>
+    </div>
+</div>
+
+<script>
+    // Data from data_interleaved.json
+    const rawData = [
+        {"gt":"Zachrysia provisoria","cat":"Mollusks","lure":"Doriopsilla fulva","dst_path":"sampled/f13f4dab-51c7-4aa3-814b-7155893651c1.jpg","cor":0,"prb":0.2611,"dsp":"Doriopsilla fulva"},
+        {"gt":"Crucibulum laeve","cat":"Fungi","lure":"Leratiomyces percevalii","dst_path":"sampled/090bb18d-cbcf-4a72-921b-49f937992cf9.jpg","cor":1,"prb":0.8454,"dsp":"Crucibulum laeve"},
+        {"gt":"Meghimatium bilineatum","cat":"Mollusks","lure":"Triopha maculata","dst_path":"sampled/2a1ee03a-2d64-4de5-98d2-3404fae5a2da.jpg","cor":0,"prb":0.0538,"dsp":"Triopha maculata"},
+        {"gt":"Physcia adscendens","cat":"Fungi","lure":"Leratiomyces ceres","dst_path":"sampled/41859efd-bf51-46e4-9446-588a52255ca1.jpg","cor":1,"prb":0.8777,"dsp":"Physcia adscendens"},
+        {"gt":"Hericium coralloides","cat":"Fungi","lure":"Mycena leaiana","dst_path":"sampled/c2552fba-726b-43cb-9a0d-27075e67d465.jpg","cor":1,"prb":0.9229,"dsp":"Hericium coralloides"},
+        {"gt":"Diloma aethiops","cat":"Mollusks","lure":"Mercenaria mercenaria","dst_path":"sampled/ce547f3a-08a1-4632-ac4a-1481bdde2660.jpg","cor":1,"prb":0.2302,"dsp":"Diloma aethiops"},
+        {"gt":"Leratiomyces erythrocephalus","cat":"Fungi","lure":"Bolbitius titubans","dst_path":"sampled/8aab2be4-4548-417d-8c88-554991d7409d.jpg","cor":1,"prb":0.6375,"dsp":"Leratiomyces erythrocephalus"},
+        {"gt":"Xylobolus frustulatus","cat":"Fungi","lure":"Craterellus fallax","dst_path":"sampled/801cc5f8-cf75-4ac1-ad20-9a8ee940c81c.jpg","cor":0,"prb":0.7439,"dsp":"Craterellus fallax"},
+        {"gt":"Crassostrea virginica","cat":"Mollusks","lure":"Helix lucorum","dst_path":"sampled/d87c632d-e3a7-4cbd-8f1a-3fbe16928e95.jpg","cor":0,"prb":0.043,"dsp":"Helix lucorum"},
+        {"gt":"Thylacodes squamigerus","cat":"Mollusks","lure":"Ariolimax californicus","dst_path":"sampled/ebf35d9c-9867-4173-8968-5651d3ccc3c0.jpg","cor":0,"prb":0.2127,"dsp":"Ariolimax californicus"},
+        {"gt":"Rhizocarpon geographicum","cat":"Fungi","lure":"Laetiporus cincinnatus","dst_path":"sampled/bbadd4bd-02a7-4c76-a859-026d4f3f1f19.jpg","cor":1,"prb":0.837,"dsp":"Rhizocarpon geographicum"},
+        {"gt":"Donax gouldii","cat":"Mollusks","lure":"Clinocardium nuttallii","dst_path":"sampled/b88d589b-b8cb-44c7-91aa-1e88173453f8.jpg","cor":0,"prb":0.3005,"dsp":"Clinocardium nuttallii"},
+        {"gt":"Hypholoma fasciculare","cat":"Fungi","lure":"Armillaria mellea","dst_path":"sampled/3959cd69-9ba8-420a-89e3-2669f6aac2a6.jpg","cor":1,"prb":0.7939,"dsp":"Hypholoma fasciculare"},
+        {"gt":"Limax cinereoniger","cat":"Mollusks","lure":"Cominella adspersa","dst_path":"sampled/0edf355c-684f-4fbf-80f1-762aa1b2ed95.jpg","cor":0,"prb":0.261,"dsp":"Cominella adspersa"},
+        {"gt":"Crassostrea virginica","cat":"Mollusks","lure":"Liguus fasciatus","dst_path":"sampled/a87a6158-7fbe-4a17-9015-6bf4b56fe641.jpg","cor":1,"prb":0.4217,"dsp":"Crassostrea virginica"},
+        {"gt":"Buccinum undatum","cat":"Mollusks","lure":"Cochlicopa lubrica","dst_path":"sampled/134c4929-645f-4cc2-b0bf-4c2c85208715.jpg","cor":1,"prb":0.7213,"dsp":"Buccinum undatum"},
+        {"gt":"Ganoderma tsugae","cat":"Fungi","lure":"Stereum versicolor","dst_path":"sampled/55cfe9c8-d74e-4885-b1cd-d7b38a28e4f4.jpg","cor":0,"prb":0.2886,"dsp":"Stereum versicolor"},
+        {"gt":"Peltodoris nobilis","cat":"Mollusks","lure":"Pteraeolidia ianthina","dst_path":"sampled/29f4b826-abf6-4790-8faa-b890c1ee352a.jpg","cor":0,"prb":0.1992,"dsp":"Pteraeolidia ianthina"},
+        {"gt":"Limax cinereoniger","cat":"Mollusks","lure":"Nuttallina californica","dst_path":"sampled/bd3bb758-1c3a-4e76-acfa-a64f0ed77f12.jpg","cor":0,"prb":0.2009,"dsp":"Nuttallina californica"},
+        {"gt":"Bondarzewia berkeleyi","cat":"Fungi","lure":"Volvopluteus gloiocephalus","dst_path":"sampled/71cf1ea5-a39c-4832-9f7a-ce0b60d3106b.jpg","cor":1,"prb":0.9445,"dsp":"Bondarzewia berkeleyi"},
+        {"gt":"Octopus tetricus","cat":"Mollusks","lure":"Littorina littorea","dst_path":"sampled/6d8474dc-ce39-4b0c-9e4b-a57775f40f8f.jpg","cor":0,"prb":0.1716,"dsp":"Littorina littorea"},
+        {"gt":"Flavoparmelia caperata","cat":"Fungi","lure":"Macrolepiota procera","dst_path":"sampled/0ffe182e-6eb8-4d86-9391-84bce44db5d5.jpg","cor":0,"prb":0.537,"dsp":"Macrolepiota procera"},
+        {"gt":"Calocera cornea","cat":"Fungi","lure":"Schizophyllum commune","dst_path":"sampled/c24a3409-0ce7-46df-af19-4c5a824940ad.jpg","cor":1,"prb":0.8587,"dsp":"Calocera cornea"},
+        {"gt":"Chlorociboria aeruginascens","cat":"Fungi","lure":"Calycina citrina","dst_path":"sampled/562a6e24-6d8d-4a02-ace9-c78b0cbb6d51.jpg","cor":0,"prb":0.644,"dsp":"Calycina citrina"},
+        {"gt":"Hygrocybe conica","cat":"Fungi","lure":"Exsudoporus frostii","dst_path":"sampled/65ad7e81-a8cb-4b95-800f-d5948e3d8415.jpg","cor":0,"prb":0.671,"dsp":"Exsudoporus frostii"},
+        {"gt":"Cochlicopa lubrica","cat":"Mollusks","lure":"Nucella lapillus","dst_path":"sampled/efc3bb5f-c2e0-42ea-9785-fcb260a77abb.jpg","cor":1,"prb":0.7555,"dsp":"Cochlicopa lubrica"},
+        {"gt":"Psathyrella candolleana","cat":"Fungi","lure":"Exidia glandulosa","dst_path":"sampled/a4868bc7-c309-4aba-b795-2b7d427375b5.jpg","cor":0,"prb":0.6371,"dsp":"Exidia glandulosa"},
+        {"gt":"Amanita augusta","cat":"Fungi","lure":"Xylobolus frustulatus","dst_path":"sampled/d4274534-4a82-4e31-baa6-ae0a0d12ec59.jpg","cor":0,"prb":0.1855,"dsp":"Xylobolus frustulatus"},
+        {"gt":"Donax variabilis","cat":"Mollusks","lure":"Lissachatina fulica","dst_path":"sampled/ebf578ff-da78-482b-93aa-b26c2dd3c534.jpg","cor":0,"prb":0.0336,"dsp":"Lissachatina fulica"},
+        {"gt":"Geitodoris heathi","cat":"Mollusks","lure":"Littoraria irrorata","dst_path":"sampled/20d5aa8b-875d-4183-919d-454e0a804d1e.jpg","cor":0,"prb":0.1316,"dsp":"Littoraria irrorata"},
+        {"gt":"Cochlicopa lubrica","cat":"Mollusks","lure":"Arianta arbustorum","dst_path":"sampled/1a5e3a6d-0770-4ff5-86ea-7164d61770c3.jpg","cor":1,"prb":0.16,"dsp":"Cochlicopa lubrica"},
+        {"gt":"Zachrysia provisoria","cat":"Mollusks","lure":"Arion ater","dst_path":"sampled/bb665c40-0a5a-44d6-9faa-46d6d17cc0f1.jpg","cor":1,"prb":0.5505,"dsp":"Zachrysia provisoria"},
+        {"gt":"Hypomyces lactifluorum","cat":"Fungi","lure":"Marasmiellus candidus","dst_path":"sampled/e1a5f17b-3e47-4be5-a3ce-026559783e9c.jpg","cor":0,"prb":0.1839,"dsp":"Marasmiellus candidus"},
+        {"gt":"Cladonia stellaris","cat":"Fungi","lure":"Teloschistes chrysophthalmus","dst_path":"sampled/674f0920-3948-492b-82e9-210cbc13922c.jpg","cor":1,"prb":0.916,"dsp":"Cladonia stellaris"},
+        {"gt":"Xerocomus subtomentosus","cat":"Fungi","lure":"Stropharia rugosoannulata","dst_path":"sampled/09fa821e-9570-4066-a8ed-cfc2729561af.jpg","cor":1,"prb":0.8515,"dsp":"Xerocomus subtomentosus"},
+        {"gt":"Urosalpinx cinerea","cat":"Mollusks","lure":"Helminthoglypta tudiculata","dst_path":"sampled/3d4c9cab-606b-4954-b6c4-92af2a124383.jpg","cor":1,"prb":0.7438,"dsp":"Urosalpinx cinerea"},
+        {"gt":"Haplotrema minimum","cat":"Mollusks","lure":"Strombus alatus","dst_path":"sampled/b2c9130d-9d94-4732-9732-e9e3a743e8e2.jpg","cor":1,"prb":0.6372,"dsp":"Haplotrema minimum"},
+        {"gt":"Aseroe rubra","cat":"Fungi","lure":"Sebacina schweinitzii","dst_path":"sampled/e3ef7bef-8edf-4fa2-813a-f900910c3aec.jpg","cor":1,"prb":0.8989,"dsp":"Aseroe rubra"},
+        {"gt":"Amanita pantherina","cat":"Fungi","lure":"Hypholoma fasciculare","dst_path":"sampled/e2d312ae-d861-431c-b60a-0f210409482b.jpg","cor":0,"prb":0.6238,"dsp":"Hypholoma fasciculare"},
+        {"gt":"Lacrymaria lacrymabunda","cat":"Fungi","lure":"Armillaria mellea","dst_path":"sampled/a670f427-7a9a-48d4-b9bb-7197e8f41870.jpg","cor":0,"prb":0.5941,"dsp":"Armillaria mellea"},
+        {"gt":"Russula brevipes","cat":"Fungi","lure":"Teloschistes flavicans","dst_path":"sampled/0459cbef-5f0f-4eea-9295-b0314b4b40d2.jpg","cor":0,"prb":0.797,"dsp":"Teloschistes flavicans"},
+        {"gt":"Meghimatium bilineatum","cat":"Mollusks","lure":"Dreissena polymorpha","dst_path":"sampled/96172df4-ea48-4d3e-ab25-1bc272a7bb5b.jpg","cor":1,"prb":0.5255,"dsp":"Meghimatium bilineatum"},
+        {"gt":"Sypharochiton pelliserpentis","cat":"Mollusks","lure":"Helminthoglypta tudiculata","dst_path":"sampled/5031dc5a-09e6-41a7-8f75-04c37bc1fc95.jpg","cor":1,"prb":0.5218,"dsp":"Sypharochiton pelliserpentis"},
+        {"gt":"Meripilus giganteus","cat":"Fungi","lure":"Volvopluteus gloiocephalus","dst_path":"sampled/e904d3e2-ea8b-4c29-8b29-a5c055585804.jpg","cor":1,"prb":0.8511,"dsp":"Meripilus giganteus"},
+        {"gt":"Californiconus californicus","cat":"Mollusks","lure":"Neverita lewisii","dst_path":"sampled/b5042d39-0423-49d7-951d-308e9507f22a.jpg","cor":1,"prb":0.7556,"dsp":"Californiconus californicus"},
+        {"gt":"Cochlicopa lubrica","cat":"Mollusks","lure":"Sepia officinalis","dst_path":"sampled/1899a3b1-ce3f-4eea-9983-d558cf607433.jpg","cor":1,"prb":0.5193,"dsp":"Cochlicopa lubrica"},
+        {"gt":"Mytilus edulis","cat":"Mollusks","lure":"Tonicella lineata","dst_path":"sampled/9b921170-adfd-4d30-b2d8-6eeb7b4d9acf.jpg","cor":1,"prb":0.2323,"dsp":"Mytilus edulis"},
+        {"gt":"Ascocoryne sarcoides","cat":"Fungi","lure":"Porodaedalea pini","dst_path":"sampled/889c354d-846f-4ae3-9c0e-0ecb879d86f3.jpg","cor":1,"prb":0.952,"dsp":"Ascocoryne sarcoides"},
+        {"gt":"Nucella lamellosa","cat":"Mollusks","lure":"Fissurella volcano","dst_path":"sampled/30f93656-1638-49b7-8af8-056fe765427a.jpg","cor":0,"prb":0.024,"dsp":"Fissurella volcano"},
+        {"gt":"Podaxis pistillaris","cat":"Fungi","lure":"Xeromphalina campanella","dst_path":"sampled/1d85681b-8630-448c-923f-8c877f1d32b2.jpg","cor":0,"prb":0.4012,"dsp":"Xeromphalina campanella"},
+        {"gt":"Verpa bohemica","cat":"Fungi","lure":"Panaeolus antillarum","dst_path":"sampled/0460381a-84a1-4e92-90ae-33b97b4cea32.jpg","cor":0,"prb":0.6592,"dsp":"Panaeolus antillarum"},
+        {"gt":"Cornu aspersum","cat":"Mollusks","lure":"Ariolimax buttoni","dst_path":"sampled/efdedffd-073a-4520-8d1a-1d9123e1dca1.jpg","cor":0,"prb":0.2064,"dsp":"Ariolimax buttoni"},
+        {"gt":"Auricularia auricula-judae","cat":"Fungi","lure":"Microporus xanthopus","dst_path":"sampled/3bc397ad-fb51-4470-9453-68aa93112529.jpg","cor":1,"prb":0.4538,"dsp":"Auricularia auricula-judae"},
+        {"gt":"Daedaleopsis confragosa","cat":"Fungi","lure":"Guepiniopsis alpina","dst_path":"sampled/a2ea5b0d-f7ca-4ba8-be65-c6752e03c8e8.jpg","cor":1,"prb":0.8357,"dsp":"Daedaleopsis confragosa"},
+        {"gt":"Myxarium nucleatum","cat":"Fungi","lure":"Leratiomyces ceres","dst_path":"sampled/1fdea99e-6bef-4d60-8189-b43c48439862.jpg","cor":1,"prb":0.8023,"dsp":"Myxarium nucleatum"},
+        {"gt":"Orienthella trilineata","cat":"Mollusks","lure":"Ceratosoma brevicaudatum","dst_path":"sampled/80584f79-fdc2-46a5-9589-ed46d1608b15.jpg","cor":1,"prb":0.2306,"dsp":"Orienthella trilineata"},
+        {"gt":"Xanthomendoza fallax","cat":"Fungi","lure":"Sarcoscypha occidentalis","dst_path":"sampled/ceca6534-ada0-48ac-8afa-91e9d27eac87.jpg","cor":1,"prb":0.9402,"dsp":"Xanthomendoza fallax"},
+        {"gt":"Triopha maculata","cat":"Mollusks","lure":"Doriopsilla fulva","dst_path":"sampled/8dbe7b59-b734-47f3-9baa-406f62e7d94a.jpg","cor":0,"prb":0.0302,"dsp":"Doriopsilla fulva"},
+        {"gt":"Teloschistes flavicans","cat":"Fungi","lure":"Trametes betulina","dst_path":"sampled/3ca094eb-5d12-4c7e-9f38-d109e853f580.jpg","cor":0,"prb":0.5174,"dsp":"Trametes betulina"},
+        {"gt":"Kelletia kelletii","cat":"Mollusks","lure":"Deroceras reticulatum","dst_path":"sampled/a9cf667c-ea4f-4ede-b591-2114d4817a1b.jpg","cor":1,"prb":0.286,"dsp":"Kelletia kelletii"},
+        {"gt":"Triopha maculata","cat":"Mollusks","lure":"Massylaea vermiculata","dst_path":"sampled/47c10fd7-000f-4a77-80ae-430d13295360.jpg","cor":0,"prb":0.1856,"dsp":"Massylaea vermiculata"},
+        {"gt":"Ceratostoma foliatum","cat":"Mollusks","lure":"Aplysia californica","dst_path":"sampled/9d530968-5e5a-4319-b3d8-586fe753360d.jpg","cor":0,"prb":0.0907,"dsp":"Aplysia californica"},
+        {"gt":"Polycera atra","cat":"Mollusks","lure":"Helix pomatia","dst_path":"sampled/dfd50110-f64d-4484-8cf3-e3d99425fb0a.jpg","cor":0,"prb":0.0803,"dsp":"Helix pomatia"},
+        {"gt":"Arianta arbustorum","cat":"Mollusks","lure":"Chiton glaucus","dst_path":"sampled/36b1fd71-ed2c-499e-b798-10fafdeb1919.jpg","cor":1,"prb":0.6033,"dsp":"Arianta arbustorum"},
+        {"gt":"Nectria cinnabarina","cat":"Fungi","lure":"Chlorophyllum brunneum","dst_path":"sampled/dabd7462-dbb5-4a42-80af-231b489d44ae.jpg","cor":1,"prb":0.5599,"dsp":"Nectria cinnabarina"},
+        {"gt":"Ariolimax buttoni","cat":"Mollusks","lure":"Tritia obsoleta","dst_path":"sampled/3c02edb4-58df-4779-83a2-3bdd28474240.jpg","cor":1,"prb":0.6739,"dsp":"Ariolimax buttoni"},
+        {"gt":"Alcithoe arabica","cat":"Mollusks","lure":"Ruditapes philippinarum","dst_path":"sampled/d580d759-0351-42b9-b248-b9b9b13b5d7f.jpg","cor":1,"prb":0.3359,"dsp":"Alcithoe arabica"},
+        {"gt":"Belocaulus angustipes","cat":"Mollusks","lure":"Peltodoris nobilis","dst_path":"sampled/41418f04-1b71-4def-b5f6-2785bf18e480.jpg","cor":1,"prb":0.8132,"dsp":"Belocaulus angustipes"},
+        {"gt":"Laetiporus sulphureus","cat":"Fungi","lure":"Omphalotus illudens","dst_path":"sampled/dc36b8c1-e454-4bcc-9f1c-22b7fd5050c2.jpg","cor":0,"prb":0.3036,"dsp":"Omphalotus illudens"},
+        {"gt":"Bjerkandera adusta","cat":"Fungi","lure":"Craterellus fallax","dst_path":"sampled/a2759992-a6f1-4930-ad5e-5ffd6c2bd524.jpg","cor":1,"prb":0.4703,"dsp":"Bjerkandera adusta"},
+        {"gt":"Hydnellum peckii","cat":"Fungi","lure":"Physcia millegrana","dst_path":"sampled/a7371564-d09e-40ee-ad12-2a2b869d45b4.jpg","cor":1,"prb":0.8724,"dsp":"Hydnellum peckii"},
+        {"gt":"Strombus alatus","cat":"Mollusks","lure":"Haplotrema minimum","dst_path":"sampled/797b0124-675d-4b0b-a03d-cb33c282d434.jpg","cor":1,"prb":0.6774,"dsp":"Strombus alatus"},
+        {"gt":"Graphis scripta","cat":"Fungi","lure":"Vulpicida pinastri","dst_path":"sampled/293b339b-2949-469b-a73a-a5be74803df2.jpg","cor":1,"prb":0.9343,"dsp":"Graphis scripta"},
+        {"gt":"Bradybaena similaris","cat":"Mollusks","lure":"Argopecten ventricosus","dst_path":"sampled/06313d05-4196-49e5-91e1-7ed84ac3f7e5.jpg","cor":1,"prb":0.2568,"dsp":"Bradybaena similaris"},
+        {"gt":"Exidia glandulosa","cat":"Fungi","lure":"Mycena leaiana","dst_path":"sampled/0f054c4c-9896-4ae7-8acd-16546de041cb.jpg","cor":0,"prb":0.3439,"dsp":"Mycena leaiana"},
+        {"gt":"Sypharochiton pelliserpentis","cat":"Mollusks","lure":"Nuttallina californica","dst_path":"sampled/97362e84-e793-4c39-baf8-3051242c22f3.jpg","cor":0,"prb":0.071,"dsp":"Nuttallina californica"},
+        {"gt":"Belocaulus angustipes","cat":"Mollusks","lure":"Dendronotus venustus","dst_path":"sampled/83c26cba-7731-4de1-9496-996de5d0ff94.jpg","cor":1,"prb":0.6707,"dsp":"Belocaulus angustipes"},
+        {"gt":"Russula brevipes","cat":"Fungi","lure":"Hericium americanum","dst_path":"sampled/91a5c6ea-3991-4031-b787-5631e61c977f.jpg","cor":0,"prb":0.6761,"dsp":"Hericium americanum"},
+        {"gt":"Evernia prunastri","cat":"Fungi","lure":"Amanita velosa","dst_path":"sampled/b777f289-06d2-4d0b-bfe0-29996d8eb3f3.jpg","cor":1,"prb":0.8601,"dsp":"Evernia prunastri"},
+        {"gt":"Milax gagates","cat":"Mollusks","lure":"Diloma aethiops","dst_path":"sampled/352af98b-c2f1-4534-b75d-6368b94d83e5.jpg","cor":1,"prb":0.2723,"dsp":"Milax gagates"},
+        {"gt":"Leccinum aurantiacum","cat":"Fungi","lure":"Leratiomyces percevalii","dst_path":"sampled/74d374ac-eca8-46c3-b81b-0077b441d65b.jpg","cor":1,"prb":0.7751,"dsp":"Leccinum aurantiacum"},
+        {"gt":"Tegula funebralis","cat":"Mollusks","lure":"Limax cinereoniger","dst_path":"sampled/c0c8d332-6c55-458d-ad2d-ff9ef522fe94.jpg","cor":0,"prb":0.1399,"dsp":"Limax cinereoniger"},
+        {"gt":"Hericium americanum","cat":"Fungi","lure":"Phellinus robiniae","dst_path":"sampled/211f1ea8-cfd6-405e-8dc6-c3094fd8562a.jpg","cor":0,"prb":0.2249,"dsp":"Phellinus robiniae"},
+        {"gt":"Sarcoscypha occidentalis","cat":"Fungi","lure":"Crepidotus mollis","dst_path":"sampled/bbdd902f-6e71-4d96-ae8a-95ba4507e5c3.jpg","cor":0,"prb":0.1671,"dsp":"Crepidotus mollis"},
+        {"gt":"Mycena pura","cat":"Fungi","lure":"Psathyrella candolleana","dst_path":"sampled/21c660ad-1a3a-48ea-b2d9-56a5d11ae696.jpg","cor":1,"prb":0.8899,"dsp":"Mycena pura"},
+        {"gt":"Elliptio complanata","cat":"Mollusks","lure":"Cyrtopleura costata","dst_path":"sampled/36d7eb4c-ba3e-4ab7-8b63-55c3a06f03cd.jpg","cor":1,"prb":0.7221,"dsp":"Elliptio complanata"},
+        {"gt":"Coprinopsis lagopus","cat":"Fungi","lure":"Panaeolus antillarum","dst_path":"sampled/b6ed59d4-1e2c-4e78-92e5-653086a9ea99.jpg","cor":0,"prb":0.2595,"dsp":"Panaeolus antillarum"},
+        {"gt":"Nuttallina californica","cat":"Mollusks","lure":"Lunella smaragdus","dst_path":"sampled/a7dcc06b-4912-465b-9ae1-76b51371db1c.jpg","cor":0,"prb":0.0392,"dsp":"Lunella smaragdus"},
+        {"gt":"Cantharellus cinnabarinus","cat":"Fungi","lure":"Verpa bohemica","dst_path":"sampled/1015d9ae-ab37-48bc-9a9c-7f302ae3fbfa.jpg","cor":1,"prb":0.7554,"dsp":"Cantharellus cinnabarinus"},
+        {"gt":"Hydnellum peckii","cat":"Fungi","lure":"Rhizocarpon geographicum","dst_path":"sampled/83c8ffca-4c24-455f-80fa-258d80e72edf.jpg","cor":0,"prb":0.3974,"dsp":"Rhizocarpon geographicum"},
+        {"gt":"Pleurotus dryinus","cat":"Fungi","lure":"Agrocybe praecox","dst_path":"sampled/d8a02958-731b-4f43-934b-2dafbdf54163.jpg","cor":0,"prb":0.2343,"dsp":"Agrocybe praecox"},
+        {"gt":"Octopus vulgaris","cat":"Mollusks","lure":"Euglandina rosea","dst_path":"sampled/5e1521aa-1cb8-4df6-9d90-b76cea4e4205.jpg","cor":0,"prb":0.0641,"dsp":"Euglandina rosea"},
+        {"gt":"Bolbitius titubans","cat":"Fungi","lure":"Coprinopsis lagopus","dst_path":"sampled/4648e507-3eda-44c8-a5b1-ddc68f374e84.jpg","cor":0,"prb":0.2589,"dsp":"Coprinopsis lagopus"},
+        {"gt":"Chlorophyllum brunneum","cat":"Fungi","lure":"Aseroe rubra","dst_path":"sampled/6e6a4c84-02cc-4692-9786-abded6a776dd.jpg","cor":0,"prb":0.6083,"dsp":"Aseroe rubra"},
+        {"gt":"Acanthopleura granulata","cat":"Mollusks","lure":"Ruditapes philippinarum","dst_path":"sampled/bcb946a1-a64f-4ab6-805f-06638506c674.jpg","cor":0,"prb":0.0839,"dsp":"Ruditapes philippinarum"},
+        {"gt":"Argopecten ventricosus","cat":"Mollusks","lure":"Aliger gigas","dst_path":"sampled/79d0d233-765b-4c6e-9edf-47465042b241.jpg","cor":0,"prb":0.0416,"dsp":"Aliger gigas"},
+        {"gt":"Argopecten ventricosus","cat":"Mollusks","lure":"Ensis leei","dst_path":"sampled/c8db551b-6ea2-4233-80a2-e6d1de52c1a7.jpg","cor":1,"prb":0.6533,"dsp":"Argopecten ventricosus"},
+        {"gt":"Haplotrema vancouverense","cat":"Mollusks","lure":"Doris montereyensis","dst_path":"sampled/8a31265c-9057-407c-acb8-0941d759a332.jpg","cor":0,"prb":0.1352,"dsp":"Doris montereyensis"},
+        {"gt":"Doriprismatica atromarginata","cat":"Mollusks","lure":"Pteraeolidia semperi","dst_path":"sampled/31a62d8c-84aa-4c1c-bc5f-fe1e1d174b73.jpg","cor":0,"prb":0.1453,"dsp":"Pteraeolidia semperi"},
+        {"gt":"Herpothallon rubrocinctum","cat":"Fungi","lure":"Phellinus tremulae","dst_path":"sampled/0ee64562-0042-4911-9204-00215e8d08f1.jpg","cor":0,"prb":0.6445,"dsp":"Phellinus tremulae"}
+    ];
+
+    const emojis = { "Fungi": "🍄", "Mollusks": "🐚" };
+    let currentIndex = 0;
+    let participantData = [];
+    let trials = [];
+
+    const screens = {
+        start: document.getElementById('start-screen'),
+        trial: document.getElementById('trial-screen'),
+        results: document.getElementById('results-screen'),
+        transition: document.getElementById('transition-screen')
+    };
+
+    function organizeBlocks() {
+        const fungi = rawData.filter(t => t.cat === "Fungi");
+        const mollusks = rawData.filter(t => t.cat === "Mollusks");
+
+        // Structure: 25F, 25M, 25F, 25M
+        trials = [
+            ...fungi.slice(0, 25),
+            ...mollusks.slice(0, 25),
+            ...fungi.slice(25, 50),
+            ...mollusks.slice(25, 50)
+        ];
+    }
+
+    function showScreen(screenId) {
+        Object.values(screens).forEach(s => s.classList.add('hidden'));
+        screens[screenId].classList.remove('hidden');
+    }
+
+    function startExperiment() {
+        organizeBlocks();
+        currentIndex = 0;
+        participantData = [];
+        showScreen('trial');
+        loadTrial();
+    }
+
+    function loadTrial() {
+        const trial = trials[currentIndex];
+        document.getElementById('trial-count').innerText = `Trial ${currentIndex + 1} / ${trials.length}`;
+        document.getElementById('trial-cat').innerHTML = `${trial.cat.toUpperCase()}: ${emojis[trial.cat]}`;
+        document.getElementById('ai-dsp').innerText = trial.dsp;
+        document.getElementById('conf-text').innerText = `${Math.round(trial.prb * 100)}%`;
+        document.getElementById('confidence-bar').style.width = `${trial.prb * 100}%`;
+
+        const img = document.getElementById('trial-image');
+        img.src = trial.dst_path;
+        img.onerror = () => { img.src = 'https://via.placeholder.com/300?text=Image+Not+Found'; };
+
+        document.getElementById('question-area').classList.remove('hidden');
+        document.getElementById('feedback-area').classList.add('hidden');
+    }
+
+    function handleResponse(response) {
+        const trial = trials[currentIndex];
+        const isParticipantCorrect = (response === trial.cor);
+
+        participantData.push({ ...trial, user_response: response, user_correct: isParticipantCorrect });
+
+        const feedbackEl = document.getElementById('feedback');
+        feedbackEl.className = isParticipantCorrect ? 'feedback-correct' : 'feedback-wrong';
+        feedbackEl.innerHTML = `
+            <strong>${isParticipantCorrect ? 'CORRECT!' : 'WRONG.'}</strong><br>
+            The AI prediction was actually <u>${trial.cor === 1 ? 'CORRECT' : 'WRONG'}</u>.
+        `;
+
+        document.getElementById('question-area').classList.add('hidden');
+        document.getElementById('feedback-area').classList.remove('hidden');
+    }
+
+    function checkNextStep() {
+        currentIndex++;
+        if (currentIndex === 100) {
+            showResults();
+        } else if (currentIndex % 25 === 0) {
+            showTransition();
+        } else {
+            loadTrial();
+        }
+    }
+
+    function showTransition() {
+        const nextCat = trials[currentIndex].cat;
+        const msg = (currentIndex === 50)
+            ? `Great job! Now, the same AI is going to help you to name a <strong>new batch of ${nextCat}</strong> images.`
+            : `Block complete! Now, the same AI is going to help you to name the <strong>${nextCat}</strong>.`;
+
+        document.getElementById('transition-msg').innerHTML = `${emojis[nextCat]} ${msg}`;
+        showScreen('transition');
+    }
+
+    function resumeExperiment() {
+        showScreen('trial');
+        loadTrial();
+    }
+
+    function showResults() {
+        showScreen('results');
+
+        const groups = [
+            { id: 'Fungi_1', cat: 'Fungi', cor: 1, label: 'Fungi 🍄 (AI Correct)' },
+            { id: 'Fungi_0', cat: 'Fungi', cor: 0, label: 'Fungi 🍄 (AI Wrong)' },
+            { id: 'Mollusks_1', cat: 'Mollusks', cor: 1, label: 'Mollusks 🐚 (AI Correct)' },
+            { id: 'Mollusks_0', cat: 'Mollusks', cor: 0, label: 'Mollusks 🐚 (AI Wrong)' }
+        ];
+
+        let html = `<table><thead><tr><th>Category Group</th><th>Accuracy</th><th>Raw Score</th></tr></thead><tbody>`;
+
+        groups.forEach(g => {
+            const groupData = participantData.filter(d => d.cat === g.cat && d.cor === g.cor);
+            const correct = groupData.filter(d => d.user_correct).length;
+            const total = groupData.length;
+            const acc = total > 0 ? Math.round((correct / total) * 100) : 0;
+            html += `<tr><td>${g.label}</td><td><strong>${acc}%</strong></td><td>${correct} / ${total}</td></tr>`;
+        });
+
+        const totalCorrect = participantData.filter(d => d.user_correct).length;
+        html += `<tr style="background:#f1f5f9; font-weight:bold;"><td>OVERALL TOTAL</td><td>${totalCorrect}%</td><td>${totalCorrect} / 100</td></tr></tbody></table>`;
+
+        document.getElementById('results-table-container').innerHTML = html;
+    }
+</script>
+
+</body>
+</html>
